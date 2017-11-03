@@ -4,21 +4,27 @@
        version="1.0.0"
        provider-name="titlovi.com">
     <requires>
-        <import addon="xbmc.python" version="2.7.10"/>
-        <import addon="script.module.requests" version="2.1.0"/>
+        <import addon="xbmc.python" version="2.14.0"/>
     </requires>
     <extension point="xbmc.subtitle.module" library="service.py"/>
     <extension point="xbmc.addon.metadata">
-        <summary>OpenSubtitles</summary>
+        <platform>all</platform>
+        <summary lang="en">Titlovi.com</summary>
         <description lang="en">Search Titlovi.com subtitles</description>
         <disclaimer>Users need to provide Titlovi.com username and password in add-on configuration</disclaimer>
         <news>Official addon</news>
         <platform>all</platform>
         <language></language>
         <license>GNU GENERAL PUBLIC LICENSE. Version 2, June 1991</license>
-        <website>http://titlovi.com</website>
+        <website>http://www.titlovi.com</website>
         <email>tturka33 [at] gmail {dot} com</email>
-        
+        <assets>
+			<icon>icon.png</icon>
+			<fanart>fanart.jpg</fanart>
+			<screenshot>resources/screenshot-01.jpg</screenshot>
+			<screenshot>resources/screenshot-02.jpg</screenshot>
+			<screenshot>resources/screenshot-03.jpg</screenshot>
+		</assets>
         <source>https://github.com/tturkalj/kodi_titlovi_com</source>
     </extension>
 </addon>

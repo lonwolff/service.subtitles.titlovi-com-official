@@ -10,6 +10,7 @@ import xbmcplugin
 import xbmcvfs
 from urlparse import parse_qs
 from os.path import basename
+from zipfile import ZipFile
 
 addon = xbmcaddon.Addon()
 author = addon.getAddonInfo('author')
@@ -21,7 +22,7 @@ get_string = addon.getLocalizedString
 script_dir = xbmc.translatePath(addon.getAddonInfo('path')).decode("utf-8")
 profile = xbmc.translatePath(addon.getAddonInfo('profile')).decode("utf-8")
 libs_dir = xbmc.translatePath(os.path.join(script_dir, 'resources', 'lib')).decode("utf-8")
-temp_dir = xbmc.translatePath(os.path.join(script_dir, 'temp')).decode("utf-8")
+temp_dir = xbmc.translatePath(os.path.join(profile, 'temp', '')).decode("utf-8")
 
 player = xbmc.Player()
 
@@ -31,6 +32,8 @@ base_plugin_url = sys.argv[0]
 
 plugin_handle = int(sys.argv[1])
 
+api_url = 'temp_url'
+
 if xbmcvfs.exists(temp_dir):
     shutil.rmtree(temp_dir)
 xbmcvfs.mkdirs(temp_dir)
@@ -38,6 +41,7 @@ xbmcvfs.mkdirs(temp_dir)
 
 def logger(message):
     xbmc.log(u"%{0} - %{1}".format(__name__, message).encode('utf-8'))
+
 
 def show_notification(header, message):
     xbmc.executebuiltin('Notification({0}, {1})'.format(header, message))
@@ -47,7 +51,6 @@ def get_params(string=""):
     """
     {'action': 'manualsearch', 'languages': 'English', 'searchstring': 'test', 'preferredlanguage': 'English'}
     """
-
 
     param = []
     if string == "":
@@ -85,6 +88,12 @@ def handle_search_action(params):
 
     parsed_name = parsed_name[0]
 
+    request_params = dict(search_string=parsed_name, languages=params['languages'])
+    # try:
+    #     response = requests.get(api_url, request_params)
+    # except Exception as e:
+    #     logger(e)
+    #     return
 
 
 def handle_action(params):
@@ -97,23 +106,42 @@ def handle_action(params):
             'searchstring': string, exists if 'action' param is 'manualsearch'
         }
     """
-    action = params['?action']
+    logger(params)
+    action = params['?action'][0]
     if action == 'search':
-        handle_search_action(params)
+        logger('handling action: search')
+        listitem = xbmcgui.ListItem(label='English',
+                                    label2='test_subtitle.en.srt'
+                                    )
+        url = "plugin://%s/?action=download" % script_id
+
+        xbmcplugin.addDirectoryItem(handle=plugin_handle, url=url, listitem=listitem, isFolder=False)
+
+        # handle_search_action(params)
 
     elif action == 'manualsearch':
         handle_search_action(params)
     elif action == 'download':
-        handle_search_action(params)
+        zip_file_location = '/home/tomislav/python_projects/kodi_titlovi_com/test_subtitle.zip'
+        if not os.path.exists(zip_file_location) or not os.path.isfile(zip_file_location):
+            show_notification(script_name, u'Subtitle file not found')
+            return
+
+        xbmc.sleep(500)
+        xbmc.executebuiltin(('XBMC.Extract("%s","%s")' % (zip_file_location, temp_dir,)).encode('utf-8'), True)
+        subtitle_file = xbmcvfs.listdir(zip_file_location)[1][0]
+        subtitle_file = os.path.join(temp_dir, subtitle_file)
+        if xbmcvfs.exists(subtitle_file):
+            list_item = xbmcgui.ListItem(label=subtitle_file)
+            xbmcplugin.addDirectoryItem(handle=plugin_handle, url=subtitle_file, listitem=list_item, isFolder=False)
+
+        # handle_search_action(params)
+
     else:
         logger(u'Invalid action')
         show_notification(script_name, get_string(2103))
 
-logger(sys.argv)
-
 params_dict = parse_qs(sys.argv[2])
-
-logger(params_dict)
 
 handle_action(params_dict)
 
