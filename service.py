@@ -96,19 +96,44 @@ def handle_search_action(params):
     #     return
 
 
-def handle_action(params):
-    """
-    :param params:
-        {
-            'action': string, one of: 'search', 'manualsearch', 'download',
-            'languages': comma separated list of strings,
-            'preferredlanguage': string,
-            'searchstring': string, exists if 'action' param is 'manualsearch'
-        }
-    """
-    logger(params)
-    action = params['?action'][0]
-    if action == 'search':
+class ActionHandler(object):
+    def __init__(self, params):
+        self.params = params
+        self.username = addon.getSetting("titlovi-username")
+        self.password = addon.getSetting("titlovi-password")
+        self.action = self.params['?action'][0]
+        logger(self.params)
+
+    def validate_params(self):
+        if not self.username or not self.password:
+            show_notification(script_name, get_string(32005))
+            return False
+        if self.action not in ('search', 'manualsearch', 'download'):
+            show_notification(script_name, get_string(2103))
+            return False
+        return True
+
+    def handle_action(self):
+        """
+        :param params:
+            {
+                'action': string, one of: 'search', 'manualsearch', 'download',
+                'languages': comma separated list of strings,
+                'preferredlanguage': string,
+                'searchstring': string, exists if 'action' param is 'manualsearch'
+            }
+        """
+        if self.action == 'search':
+            self.handle_search_action()
+        elif self.action == 'manualsearch':
+            self.handle_search_action()
+        elif self.action == 'download':
+            self.handle_download_action()
+        else:
+            logger(u'Invalid action')
+            show_notification(script_name, get_string(2103))
+
+    def handle_search_action(self):
         logger('handling action: search')
         listitem = xbmcgui.ListItem(label='English',
                                     label2='test_subtitle.en.srt'
@@ -117,11 +142,7 @@ def handle_action(params):
 
         xbmcplugin.addDirectoryItem(handle=plugin_handle, url=url, listitem=listitem, isFolder=False)
 
-        # handle_search_action(params)
-
-    elif action == 'manualsearch':
-        handle_search_action(params)
-    elif action == 'download':
+    def handle_download_action(self):
         zip_file_location = '/home/tomislav/python_projects/kodi_titlovi_com/test_subtitle.zip'
         if not os.path.exists(zip_file_location) or not os.path.isfile(zip_file_location):
             show_notification(script_name, u'Subtitle file not found')
@@ -135,14 +156,10 @@ def handle_action(params):
             list_item = xbmcgui.ListItem(label=subtitle_file)
             xbmcplugin.addDirectoryItem(handle=plugin_handle, url=subtitle_file, listitem=list_item, isFolder=False)
 
-        # handle_search_action(params)
-
-    else:
-        logger(u'Invalid action')
-        show_notification(script_name, get_string(2103))
-
 params_dict = parse_qs(sys.argv[2])
 
-handle_action(params_dict)
+action_handler = ActionHandler(params_dict)
+if action_handler.validate_params():
+    action_handler.handle_action()
 
 xbmcplugin.endOfDirectory(plugin_handle)
