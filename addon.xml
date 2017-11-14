@@ -4,7 +4,9 @@
        version="1.0.0"
        provider-name="titlovi.com">
     <requires>
-        <import addon="xbmc.python" version="2.14.0"/>
+        <import addon="xbmc.python" version="2.7"/>
+        <import addon="script.module.requests" version="2.18.4"/>
+        <import addon="script.module.simplecache"/>
     </requires>
     <extension point="xbmc.subtitle.module" library="service.py"/>
     <extension point="xbmc.addon.metadata">

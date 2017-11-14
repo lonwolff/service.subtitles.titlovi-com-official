@@ -8,9 +8,12 @@ import xbmcaddon
 import xbmcgui
 import xbmcplugin
 import xbmcvfs
+import requests
+import simplecache
 from urlparse import parse_qs
 from os.path import basename
 from zipfile import ZipFile
+from datetime import timedelta
 
 addon = xbmcaddon.Addon()
 author = addon.getAddonInfo('author')
@@ -34,9 +37,10 @@ plugin_handle = int(sys.argv[1])
 
 api_url = 'temp_url'
 
-if xbmcvfs.exists(temp_dir):
-    shutil.rmtree(temp_dir)
-xbmcvfs.mkdirs(temp_dir)
+if not xbmcvfs.exists(temp_dir):
+    xbmcvfs.mkdirs(temp_dir)
+
+addon_cache = simplecache.SimpleCache()
 
 
 def logger(message):
@@ -46,74 +50,8 @@ def logger(message):
 def show_notification(header, message):
     xbmc.executebuiltin('Notification({0}, {1})'.format(header, message))
 
-
-def get_params(string=""):
-    """
-    {'action': 'manualsearch', 'languages': 'English', 'searchstring': 'test', 'preferredlanguage': 'English'}
-    """
-
-    param = []
-    if string == "":
-        paramstring = sys.argv[2]
-    else:
-        paramstring = string
-    if len(paramstring) >= 2:
-        params = paramstring
-        cleanedparams = params.replace('?', '')
-        if (params[len(params) - 1] == '/'):
-            params = params[0:len(params) - 2]
-        pairsofparams = cleanedparams.split('&')
-        param = {}
-        for i in range(len(pairsofparams)):
-            splitparams = {}
-            splitparams = pairsofparams[i].split('=')
-            if (len(splitparams)) == 2:
-                param[splitparams[0]] = splitparams[1]
-
-    return param
-
-
-def handle_search_action(params):
-    try:
-        current_video_name = player.getPlayingFile()
-    except Exception as e:
-        logger(e)
-        show_notification(script_name, u'Video not playing!')
-        return
-
-    parsed_name = basename(current_video_name).rsplit('.', 1)
-    if not parsed_name:
-        show_notification(script_name, u'Invalid video name!')
-        return
-
-    parsed_name = parsed_name[0]
-
-    request_params = dict(search_string=parsed_name, languages=params['languages'])
-    # try:
-    #     response = requests.get(api_url, request_params)
-    # except Exception as e:
-    #     logger(e)
-    #     return
-
-
 class ActionHandler(object):
     def __init__(self, params):
-        self.params = params
-        self.username = addon.getSetting("titlovi-username")
-        self.password = addon.getSetting("titlovi-password")
-        self.action = self.params['?action'][0]
-        logger(self.params)
-
-    def validate_params(self):
-        if not self.username or not self.password:
-            show_notification(script_name, get_string(32005))
-            return False
-        if self.action not in ('search', 'manualsearch', 'download'):
-            show_notification(script_name, get_string(2103))
-            return False
-        return True
-
-    def handle_action(self):
         """
         :param params:
             {
@@ -123,10 +61,54 @@ class ActionHandler(object):
                 'searchstring': string, exists if 'action' param is 'manualsearch'
             }
         """
+
+        self.params = params
+        self.username = addon.getSetting("titlovi-username")
+        self.password = addon.getSetting("titlovi-password")
+        self.action = self.params['?action'][0]
+        self.login_cookie = None
+
+    def validate_params(self):
+        """
+        Method used for validating required parameters: 'username', 'password' and 'action'.
+        """
+        if not self.username or not self.password:
+            show_notification(script_name, get_string(32005))
+            return False
+        if self.action not in ('search', 'manualsearch', 'download'):
+            show_notification(script_name, get_string(2103))
+            return False
+        return True
+    
+    def user_login(self):
+        """
+        Method used for logging in with titlovi.com username and password.
+        After successful login cookie is stored in cache.
+        """
+        resp_cookies = addon_cache.get('titlovi_com_cookie')
+        if not resp_cookies:
+            login_params = dict(username=self.username, password=self.password)
+            response = requests.get('{0}/login'.format(api_url), login_params)
+            if response.status_code == requests.codes.ok:
+                resp_cookies = response.cookies
+                addon_cache.set('titlovi_com_cookie', resp_cookies, expiration=timedelta(hours=24))
+                self.login_cookie = resp_cookies
+                return True
+            else:
+                show_notification(script_name, u'Titlovi.com login error, try again')
+                return False
+        self.login_cookie = resp_cookies
+        return True
+
+    def handle_action(self):
+        """
+        Method used for calling other action methods depending on 'action' parameter.
+        """
+
         if self.action == 'search':
             self.handle_search_action()
         elif self.action == 'manualsearch':
-            self.handle_search_action()
+            self.handle_manual_search_action()
         elif self.action == 'download':
             self.handle_download_action()
         else:
@@ -134,7 +116,33 @@ class ActionHandler(object):
             show_notification(script_name, get_string(2103))
 
     def handle_search_action(self):
+        """
+        Method used for searching
+        """
         logger('handling action: search')
+    	
+        try:
+            current_video_name = player.getPlayingFile()
+        except Exception as e:
+            logger(e)
+            show_notification(script_name, u'Video not playing!')
+            return
+
+        parsed_name = basename(current_video_name).rsplit('.', 1)
+        if not parsed_name:
+            show_notification(script_name, u'Invalid video name!')
+            return
+
+        parsed_name = parsed_name[0]
+
+        request_params = dict(search_string=parsed_name, languages=self.params['languages'])
+        try:
+            response = requests.get(api_url, request_params)
+            response_data = response.json()
+        except Exception as e:
+            logger(e)
+            return
+        
         listitem = xbmcgui.ListItem(label='English',
                                     label2='test_subtitle.en.srt'
                                     )
@@ -142,6 +150,8 @@ class ActionHandler(object):
 
         xbmcplugin.addDirectoryItem(handle=plugin_handle, url=url, listitem=listitem, isFolder=False)
 
+    # TODO def handle_manual_search_action
+    
     def handle_download_action(self):
         zip_file_location = '/home/tomislav/python_projects/kodi_titlovi_com/test_subtitle.zip'
         if not os.path.exists(zip_file_location) or not os.path.isfile(zip_file_location):
@@ -156,10 +166,15 @@ class ActionHandler(object):
             list_item = xbmcgui.ListItem(label=subtitle_file)
             xbmcplugin.addDirectoryItem(handle=plugin_handle, url=subtitle_file, listitem=list_item, isFolder=False)
 
+"""
+{'action': 'manualsearch', 'languages': 'English', 'searchstring': 'test', 'preferredlanguage': 'English'}
+"""
 params_dict = parse_qs(sys.argv[2])
-
+logger(params_dict)
 action_handler = ActionHandler(params_dict)
 if action_handler.validate_params():
-    action_handler.handle_action()
+    is_user_loggedin = action_handler.user_login()
+    if is_user_loggedin:
+        action_handler.handle_action()
 
 xbmcplugin.endOfDirectory(plugin_handle)
