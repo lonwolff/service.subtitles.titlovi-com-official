@@ -10,10 +10,13 @@ import xbmcplugin
 import xbmcvfs
 import requests
 import simplecache
+import time
+import unicodedata
+from datetime import datetime
 from urlparse import parse_qs
 from os.path import basename
 from zipfile import ZipFile
-from datetime import timedelta, datetime
+from datetime import timedelta
 
 addon = xbmcaddon.Addon()
 video_info = xbmc.InfoTagVideo()
@@ -47,9 +50,29 @@ addon_cache = simplecache.SimpleCache()
 def logger(message):
     xbmc.log(u"{0} - {1}".format(__name__, message).encode('utf-8'))
 
-
 def show_notification(message):
     xbmc.executebuiltin('Notification({0}, {1})'.format(script_name, message))
+
+def normalize_string(_string):
+    return unicodedata.normalize('NFKD', unicode(_string, 'utf-8')).encode('ascii', 'ignore')
+
+language_mapping = {
+    'English': 'English',
+    'Croatian': 'Hrvatski',
+    'Serbian': 'Srpski',
+    'Slovenian': 'Slovenski',
+    'Macedonian': 'Makedonski',
+    'Bosnian': 'Bosanski'
+}
+
+language_icon_mapping = {
+    'English': 'en',
+    'Hrvatski': 'hr',
+    'Srpski': 'sr',
+    'Slovenski': 'sl',
+    'Makedonski': 'mk',
+    'Bosanski': 'bs'
+}
 
 class ActionHandler(object):
     def __init__(self, params):
@@ -82,28 +105,23 @@ class ActionHandler(object):
         return True
     
     def get_prepared_language_param(self):
-        language_mapping = {
-            'English': 'English',
-            'Croatian': 'Hrvatski',
-            'Serbian': 'Srpski',
-            'Slovenian': 'Slovenski',
-            'Macedonian': 'Makedonski',
-            'Bosnian': 'Bosanski'
-        }
-        subtitle_lang_string = self.params['languages']
-        if not subtitle_lang_string:
+        if not self.params['languages']:
             return None
-        lang_list = 
-        for key in language_mapping:
-            if key in subtitle_lang_string:
-                subtitle_lang_string.replace(key, language_mapping[key])
+
+        lang_list = []
+        for lang in self.params['languages'][0].split(','):
+            if lang == 'Serbo-Croatian':
+                if language_mapping['Serbian'] not in lang_list:
+                    lang_list.append(language_mapping['Serbian'])
+                if language_mapping['Croatian'] not in lang_list:
+                    lang_list.append(language_mapping['Croatian'])
+            else:
+                if language_mapping[lang] not in lang_list:
+                    lang_list.append(language_mapping[lang])
+                   
+        lang_string = '|'.join(lang_list)
         
-        if 'Serbo-Croatian' in 
-        subtitle_lang_string.replace(',', '|')
-        return subtitle_lang_string
-
-        #TODO 'Serbo-Croatian'
-
+        return lang_string
     def handle_login(self):
         """
         Method used for sending user login request.
@@ -158,7 +176,8 @@ class ActionHandler(object):
         
         logger('user login data found in cache: {0}'.format(titlovi_com_login_data))
         expiration_date_string = titlovi_com_login_data.get('ExpirationDate')
-        expiration_date = datetime.strptime(expiration_date_string, '%Y-%m-%dT%H:%M:%S.%f')
+        expiration_date = datetime(*(time.strptime(expiration_date_string,  '%Y-%m-%dT%H:%M:%S.%f')[0:6]))
+        #expiration_date = datetime.strptime(expiration_date_string, '%Y-%m-%dT%H:%M:%S.%f')
         date_delta = expiration_date - datetime.now()
         if date_delta.days <= 1:
             login_data = self.handle_login()
@@ -184,47 +203,116 @@ class ActionHandler(object):
             logger(u'Invalid action')
             show_notification(get_string(2103))
 
-    def handle_search_action(self, search_string=None):
+    def handle_search_action(self):
         """
         Method used for searching
-        """
-        logger('handling action: search')
-    	
-        search_string = self.params.get('searchstring')
-        if not search_string:
-            try:
-                current_video_name = player.getPlayingFile()
-            except Exception as e:
-                logger(e)
-                show_notification(u'Video not playing!')
+          """
+        logger('starting search')
+        search_params = dict(token=self.login_token, userid=self.user_id, json=True)
+
+        if self.action == 'manualsearch':
+            search_string = self.params.get('searchstring')
+            if not search_string:
+                show_notification(u'Please enter search text!')
                 return
+            search_params['query'] = search_string
+        else:
+            imdb_id = video_info.getIMDBNumber()
+            if imdb_id:
+                search_params['imdbID'] = imdb_id
 
-            parsed_name = basename(current_video_name).rsplit('.', 1)
-            if not parsed_name:
-                show_notification(u'Invalid video name!')
-                return
-            search_string = parsed_name[0]
+            season = str(xbmc.getInfoLabel("VideoPlayer.Season"))
+            episode = str(xbmc.getInfoLabel("VideoPlayer.Episode"))
+            tv_show_title = normalize_string(xbmc.getInfoLabel("VideoPlayer.TVshowtitle"))
+            if tv_show_title:
+                search_params['query'] = tv_show_title
+                if season:
+                    search_params['season'] = season 
+                if episode:
+                    search_params['episode'] = episode
+            else:
+                title = normalize_string(xbmc.getInfoLabel("VideoPlayer.OriginalTitle"))
+                if not title:
+                    title = normalize_string(xbmc.getInfoLabel("VideoPlayer.Title"))
+                
+                if title:
+                    search_params['query'] = title
+                else:
+                    try:
+                        current_video_name, year = xbmc.getCleanMovieTitle(player.getPlayingFile())
+                    except Exception as e:
+                        logger(e)
+                        show_notification(u'Video not playing!')
+                        return
+                    search_params['query'] = current_video_name
 
-        search_params = dict(token=self.login_token, userid=self.user_id, query=search_string)
-        if self.params['languages']:
-            search_params
+        search_language = self.get_prepared_language_param()
+        if search_language:
+            search_params['lang'] = search_language
 
-        request_params = dict(search_string=search_string, languages=self.params['languages'])
-        try:
-            response = requests.get(api_url, request_params)
-            response_data = response.json()
-        except Exception as e:
-            logger(e)
-            return
-        
-        listitem = xbmcgui.ListItem(label='English',
-                                    label2='test_subtitle.en.srt'
-                                    )
-        url = "plugin://%s/?action=download" % script_id
+        logger('search params: {0}'.format(search_params))
 
-        xbmcplugin.addDirectoryItem(handle=plugin_handle, url=url, listitem=listitem, isFolder=False)
+        sorted_search_params = sorted(search_params.items())
+        hashable_search_params = tuple(temp for tuple_param in sorted_search_params for temp in tuple_param)
+        logger('hashable_search_params: {0}'.format(hashable_search_params))
+        params_hash = unicode(hash(hashable_search_params))
+        logger('params_hash: {0}'.format(params_hash))
+        result_list = addon_cache.get(params_hash)
+        if result_list:
+            logger('results loaded from cache')
+
+        if not result_list:
+            logger('results not found in cache, getting results from API')
+            result_list_page = 1
+            result_list = []
+            while True:
+                search_params['pageNum'] = result_list_page
+                try:
+                    response = requests.get('{0}/search'.format(api_url), params=search_params)
+                    logger('Response status code: {0}'.format(response.status_code))
+                    if response.status_code == requests.codes.ok:
+                        resp_json = response.json()
+                    elif resp_json.status_code == requests.codes.unauthorized:
+                        # force user login in case of Unauthorized response
+                        is_loggedin = self.user_login()
+                        if not is_loggedin:
+                            logger('Force login failed, exiting!')
+                            return
+                    else:
+                        logger('Invalid response status code, exiting!')
+                        return 
+                    
+                    if resp_json['SubtitleResults']:
+                        result_list.extend(resp_json['SubtitleResults'])
+
+                    if resp_json['PagesAvailable'] > resp_json['CurrentPage']:
+                        result_list_page = resp_json['CurrentPage'] + 1
+                    else:
+                        break
+                except Exception as e:
+                    logger(e)
+                    return
+            logger('Search response data: {0}'.format(result_list))
+
+            if result_list:
+                addon_cache.set(params_hash, result_list, expiration=timedelta(days=3))
+
+        for result_item in result_list:
+            listitem = xbmcgui.ListItem(
+                label=result_item['Lang'], 
+                label2=result_item['Title'], 
+                iconImage='5',
+                thumbnailImage=language_icon_mapping[result_item['Lang']]
+            )
+            url = "plugin://{0}/?action=download&media_id={1}&type={2}"\
+                .format(script_id, result_item['Id'], result_item['Type'])
+
+            xbmcplugin.addDirectoryItem(handle=plugin_handle, url=url, listitem=listitem, isFolder=False)
 
     def handle_download_action(self):
+        download_url = "https://titlovi.com/download/?type={0}&mediaid={1}"\
+            .format(self.params['type'], self.params['media_id'])
+
         zip_file_location = '/home/tomislav/python_projects/kodi_titlovi_com/test_subtitle.zip'
         if not os.path.exists(zip_file_location) or not os.path.isfile(zip_file_location):
             show_notification(u'Subtitle file not found')
@@ -240,8 +328,9 @@ class ActionHandler(object):
 
 """
 params_dict:
-{'action': 'manualsearch', 'languages': 'English', 'searchstring': 'test', 'preferredlanguage': 'English'}
+{'action': ['manualsearch'], 'languages': ['English,Croatian'], 'searchstring': ['test'], 'preferredlanguage': ['English']}
 """
+
 params_dict = parse_qs(sys.argv[2])
 logger(params_dict)
 
@@ -250,6 +339,6 @@ if action_handler.validate_params():
     is_user_loggedin = action_handler.user_login()
     if is_user_loggedin:
         logger(u'user is logged in')
-        # action_handler.handle_action()
+        action_handler.handle_action()
 
 xbmcplugin.endOfDirectory(plugin_handle)
