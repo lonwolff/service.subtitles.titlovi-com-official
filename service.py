@@ -12,6 +12,9 @@ import requests
 import simplecache
 import time
 import unicodedata
+import zipfile
+import StringIO
+import urllib2
 from datetime import datetime
 from urlparse import parse_qs
 from os.path import basename
@@ -236,7 +239,8 @@ class ActionHandler(object):
                     title = normalize_string(xbmc.getInfoLabel("VideoPlayer.Title"))
                 
                 if title:
-                    search_params['query'] = title
+                    clean_title, year = xbmc.getCleanMovieTitle(title)
+                    search_params['query'] = clean_title
                 else:
                     try:
                         current_video_name, year = xbmc.getCleanMovieTitle(player.getPlayingFile())
@@ -250,12 +254,11 @@ class ActionHandler(object):
         if search_language:
             search_params['lang'] = search_language
 
-        logger('search params: {0}'.format(search_params))
-
         sorted_search_params = sorted(search_params.items())
         hashable_search_params = tuple(temp for tuple_param in sorted_search_params for temp in tuple_param)
         logger('hashable_search_params: {0}'.format(hashable_search_params))
-        params_hash = unicode(hash(hashable_search_params))
+        logger(type(hashable_search_params))
+        params_hash = unicode(repr(hashable_search_params))
         logger('params_hash: {0}'.format(params_hash))
         result_list = addon_cache.get(params_hash)
         if result_list:
@@ -267,6 +270,7 @@ class ActionHandler(object):
             result_list = []
             while True:
                 search_params['pageNum'] = result_list_page
+                logger('search params: {0}'.format(search_params))
                 try:
                     response = requests.get('{0}/search'.format(api_url), params=search_params)
                     logger('Response status code: {0}'.format(response.status_code))
@@ -281,27 +285,32 @@ class ActionHandler(object):
                     else:
                         logger('Invalid response status code, exiting!')
                         return 
-                    
+
                     if resp_json['SubtitleResults']:
                         result_list.extend(resp_json['SubtitleResults'])
 
                     if resp_json['PagesAvailable'] > resp_json['CurrentPage']:
-                        result_list_page = resp_json['CurrentPage'] + 1
+                        result_list_page += 1
                     else:
                         break
                 except Exception as e:
                     logger(e)
                     return
-            logger('Search response data: {0}'.format(result_list))
 
             if result_list:
                 addon_cache.set(params_hash, result_list, expiration=timedelta(days=3))
 
+        logger('len(result_list): {0}'.format(len(result_list)))
+        
         for result_item in result_list:
+            title = result_item['Title']
+            if result_item['Release']:
+                title = u'{0} {1}'.format(title, result_item['Release'])
+
             listitem = xbmcgui.ListItem(
                 label=result_item['Lang'], 
-                label2=result_item['Title'], 
-                iconImage='5',
+                label2=title, 
+                iconImage=str(int(result_item['Rating'])),
                 thumbnailImage=language_icon_mapping[result_item['Lang']]
             )
             url = "plugin://{0}/?action=download&media_id={1}&type={2}"\
@@ -310,21 +319,54 @@ class ActionHandler(object):
             xbmcplugin.addDirectoryItem(handle=plugin_handle, url=url, listitem=listitem, isFolder=False)
 
     def handle_download_action(self):
-        download_url = "https://titlovi.com/download/?type={0}&mediaid={1}"\
-            .format(self.params['type'], self.params['media_id'])
+        subtitle_exists = False
+        cache_key = 'titlovi_com_subtitle_{0}_{1}'.format(self.params['media_id'], self.params['type'])
+        subtitle_file = addon_cache.get(cache_key)
+        
+        if subtitle_file:
+            subtitle_file_path = os.path.join(temp_dir, subtitle_file)
+            if os.path.exists(subtitle_file_path) and os.path.isfile(subtitle_file_path):
+                subtitle_exists = True
+                logger('subtitle_file found in cache')
 
-        zip_file_location = '/home/tomislav/python_projects/kodi_titlovi_com/test_subtitle.zip'
-        if not os.path.exists(zip_file_location) or not os.path.isfile(zip_file_location):
-            show_notification(u'Subtitle file not found')
-            return
+        if not subtitle_exists:
+            logger('subtitle_file not found in cache, starting download')
+            request_params = dict(username=self.username, password=self.password)
+            download_url = "https://titlovi.com/download/?type={0}&mediaid={1}"\
+                .format(self.params['type'][0], self.params['media_id'][0])
+            try:
+                logger(download_url)
+                useragent = ("User-Agent=Mozilla/5.0 (Windows; U; Windows NT 6.1; en-US; rv:1.9.2.3) "
+                       "Gecko/20100401 Firefox/3.6.3 ( .NET CLR 3.5.30729)")
+                headers = {'User-Agent': useragent, 'Referer': 'www.titlovi.com'}
+                request = urllib2.Request(download_url, None, headers)
+                response = urllib2.urlopen(request)
+                if response.getcode() != 200:
+                    show_notification('Error when downloading subtitle!')
+                    return
+            except Exception as e:
+                logger(e)
+                show_notification('Error when downloading subtitle!')
+                return
+            
+            temp_zip_file_path = os.path.join(temp_dir, 'titlovi_com_temp.zip')
+            temp_zip_file = xbmcvfs.File(temp_zip_file_path, "wb")
+            temp_zip_file.write(response.read())
+            temp_zip_file.close()
+            
+            zip_file = zipfile.ZipFile(temp_zip_file_path)
+            zip_contents = zip_file.namelist()
+            if not zip_contents:
+                show_notification('Error when downloading subtitle!')
+                return
+            subtitle_file = zip_contents[0]
+            logger('subtitle_file: {0}'.format(subtitle_file))
+            xbmc.executebuiltin(('XBMC.Extract("%s","%s")' % (temp_zip_file_path, temp_dir,)).encode('utf-8'), True)
+            subtitle_file_path = os.path.join(temp_dir, subtitle_file)
+            addon_cache.set(cache_key, subtitle_file, expiration=timedelta(days=3))
 
-        xbmc.sleep(500)
-        xbmc.executebuiltin(('XBMC.Extract("%s","%s")' % (zip_file_location, temp_dir,)).encode('utf-8'), True)
-        subtitle_file = xbmcvfs.listdir(zip_file_location)[1][0]
-        subtitle_file = os.path.join(temp_dir, subtitle_file)
-        if xbmcvfs.exists(subtitle_file):
-            list_item = xbmcgui.ListItem(label=subtitle_file)
-            xbmcplugin.addDirectoryItem(handle=plugin_handle, url=subtitle_file, listitem=list_item, isFolder=False)
+        list_item = xbmcgui.ListItem(label=subtitle_file)
+        xbmcplugin.addDirectoryItem(handle=plugin_handle, url=subtitle_file_path, listitem=list_item, isFolder=False)
 
 """
 params_dict:
@@ -333,7 +375,7 @@ params_dict:
 
 params_dict = parse_qs(sys.argv[2])
 logger(params_dict)
-
+logger('temp_dir: {0}'.format(temp_dir))
 action_handler = ActionHandler(params_dict)
 if action_handler.validate_params():
     is_user_loggedin = action_handler.user_login()
