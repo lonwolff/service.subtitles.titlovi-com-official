@@ -149,7 +149,7 @@ class ActionHandler(object):
                 logger('login response data: {0}'.format(resp_json))
                 return resp_json
             elif resp_json.status_code == requests.codes.unauthorized:
-                show_notification('Unauthorized, please check your login information!')
+                show_notification(get_string(32006))
                 return None
             else:
                 return None
@@ -172,7 +172,7 @@ class ActionHandler(object):
             logger('login data not found in cache')
             login_data = self.handle_login()
             if login_data is None:
-                show_notification(u'Titlovi.com login error, try again')
+                show_notification(get_string(32007))
                 return False
             self.set_login_data(login_data)
             return True
@@ -185,7 +185,7 @@ class ActionHandler(object):
         if date_delta.days <= 1:
             login_data = self.handle_login()
             if login_data is None:
-                show_notification(u'Titlovi.com login error, try again')
+                show_notification(get_string(32007))
                 return False
             self.set_login_data(login_data)
             return True
@@ -216,7 +216,7 @@ class ActionHandler(object):
         if self.action == 'manualsearch':
             search_string = self.params.get('searchstring')
             if not search_string:
-                show_notification(u'Please enter search text!')
+                show_notification(get_string(32008))
                 return
             search_params['query'] = search_string
         else:
@@ -246,7 +246,7 @@ class ActionHandler(object):
                         current_video_name, year = xbmc.getCleanMovieTitle(player.getPlayingFile())
                     except Exception as e:
                         logger(e)
-                        show_notification(u'Video not playing!')
+                        show_notification(get_string(32009))
                         return
                     search_params['query'] = current_video_name
 
@@ -322,7 +322,6 @@ class ActionHandler(object):
         subtitle_exists = False
         cache_key = 'titlovi_com_subtitle_{0}_{1}'.format(self.params['media_id'], self.params['type'])
         subtitle_file = addon_cache.get(cache_key)
-        
         if subtitle_file:
             subtitle_file_path = os.path.join(temp_dir, subtitle_file)
             if os.path.exists(subtitle_file_path) and os.path.isfile(subtitle_file_path):
@@ -336,32 +335,27 @@ class ActionHandler(object):
                 .format(self.params['type'][0], self.params['media_id'][0])
             try:
                 logger(download_url)
-                useragent = ("User-Agent=Mozilla/5.0 (Windows; U; Windows NT 6.1; en-US; rv:1.9.2.3) "
-                       "Gecko/20100401 Firefox/3.6.3 ( .NET CLR 3.5.30729)")
-                headers = {'User-Agent': useragent, 'Referer': 'www.titlovi.com'}
-                request = urllib2.Request(download_url, None, headers)
-                response = urllib2.urlopen(request)
-                if response.getcode() != 200:
-                    show_notification('Error when downloading subtitle!')
+                user_agent = "User-Agent=Mozilla/5.0 (Windows; U; Windows NT 6.1; en-US; rv:1.9.2.3) \
+                             Gecko/20100401 Firefox/3.6.3 ( .NET CLR 3.5.30729)"
+                headers = {'User-Agent': user_agent, 'Referer': 'www.titlovi.com'}
+                response = requests.get(download_url, headers=headers)
+                if response.status_code != requests.codes.ok:
+                    show_notification(get_string(32010))
                     return
             except Exception as e:
                 logger(e)
-                show_notification('Error when downloading subtitle!')
+                show_notification(get_string(32010))
                 return
             
-            temp_zip_file_path = os.path.join(temp_dir, 'titlovi_com_temp.zip')
-            temp_zip_file = xbmcvfs.File(temp_zip_file_path, "wb")
-            temp_zip_file.write(response.read())
-            temp_zip_file.close()
-            
-            zip_file = zipfile.ZipFile(temp_zip_file_path)
+            zip_file = zipfile.ZipFile(StringIO.StringIO(response.content))
             zip_contents = zip_file.namelist()
             if not zip_contents:
-                show_notification('Error when downloading subtitle!')
+                show_notification(get_string(32010))
                 return
+
             subtitle_file = zip_contents[0]
             logger('subtitle_file: {0}'.format(subtitle_file))
-            xbmc.executebuiltin(('XBMC.Extract("%s","%s")' % (temp_zip_file_path, temp_dir,)).encode('utf-8'), True)
+            zip_file.extractall(temp_dir)
             subtitle_file_path = os.path.join(temp_dir, subtitle_file)
             addon_cache.set(cache_key, subtitle_file, expiration=timedelta(days=3))
 
