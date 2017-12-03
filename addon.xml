@@ -21,6 +21,8 @@
         <website>http://www.titlovi.com</website>
         <email>tturka33 [at] gmail {dot} com</email>
         <assets>
+            <icon>icon.png</icon>
+            <fanart>fanart.jpg</fanart>
 			<screenshot>resources/media/screenshot1.png</screenshot>
             <screenshot>resources/media/screenshot2.png</screenshot>
             <screenshot>resources/media/screenshot3.png</screenshot>

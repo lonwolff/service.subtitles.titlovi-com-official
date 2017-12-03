@@ -14,12 +14,10 @@ import time
 import unicodedata
 import zipfile
 import StringIO
-import urllib2
-from datetime import datetime
+from datetime import datetime, timedelta
 from urlparse import parse_qs
 from os.path import basename
 from zipfile import ZipFile
-from datetime import timedelta
 
 addon = xbmcaddon.Addon()
 video_info = xbmc.InfoTagVideo()
@@ -108,6 +106,10 @@ class ActionHandler(object):
         return True
     
     def get_prepared_language_param(self):
+        """
+        Method used for parsing chosen subtitle languages and formatting them in format accepted by Titlovi.com API.
+        """
+
         if not self.params['languages']:
             return None
 
@@ -125,6 +127,7 @@ class ActionHandler(object):
         lang_string = '|'.join(lang_list)
         
         return lang_string
+
     def handle_login(self):
         """
         Method used for sending user login request.
@@ -148,7 +151,7 @@ class ActionHandler(object):
                 resp_json = response.json()
                 logger('login response data: {0}'.format(resp_json))
                 return resp_json
-            elif resp_json.status_code == requests.codes.unauthorized:
+            elif response.status_code == requests.codes.unauthorized:
                 show_notification(get_string(32006))
                 return None
             else:
@@ -205,14 +208,13 @@ class ActionHandler(object):
         else:
             logger(u'Invalid action')
             show_notification(get_string(2103))
-
+        
     def handle_search_action(self):
         """
         Method used for searching
           """
         logger('starting search')
-        search_params = dict(token=self.login_token, userid=self.user_id, json=True)
-
+        search_params = {}
         if self.action == 'manualsearch':
             search_string = self.params.get('searchstring')
             if not search_string:
@@ -256,20 +258,20 @@ class ActionHandler(object):
 
         sorted_search_params = sorted(search_params.items())
         hashable_search_params = tuple(temp for tuple_param in sorted_search_params for temp in tuple_param)
-        logger('hashable_search_params: {0}'.format(hashable_search_params))
-        logger(type(hashable_search_params))
         params_hash = unicode(repr(hashable_search_params))
-        logger('params_hash: {0}'.format(params_hash))
         result_list = addon_cache.get(params_hash)
         if result_list:
             logger('results loaded from cache')
 
         if not result_list:
             logger('results not found in cache, getting results from API')
+            search_params['token'] = self.login_token
+            search_params['userid'] = self.user_id
+            search_params['json'] = True
             result_list_page = 1
             result_list = []
             while True:
-                search_params['pageNum'] = result_list_page
+                search_params['pg'] = result_list_page
                 logger('search params: {0}'.format(search_params))
                 try:
                     response = requests.get('{0}/search'.format(api_url), params=search_params)
@@ -282,6 +284,14 @@ class ActionHandler(object):
                         if not is_loggedin:
                             logger('Force login failed, exiting!')
                             return
+                        search_params['token'] = self.login_token
+                        search_params['userid'] = self.user_id
+                        response = requests.get('{0}/search'.format(api_url), params=search_params)
+                        if response.status_code == requests.codes.ok:
+                            resp_json = response.json()
+                        else:
+                            logger('Invalid response status code, exiting!')
+                            return 
                     else:
                         logger('Invalid response status code, exiting!')
                         return 
@@ -293,6 +303,10 @@ class ActionHandler(object):
                         result_list_page += 1
                     else:
                         break
+                    
+                    if result_list_page == 50:
+                        break
+
                 except Exception as e:
                     logger(e)
                     return
@@ -300,8 +314,6 @@ class ActionHandler(object):
             if result_list:
                 addon_cache.set(params_hash, result_list, expiration=timedelta(days=3))
 
-        logger('len(result_list): {0}'.format(len(result_list)))
-        
         for result_item in result_list:
             title = result_item['Title']
             if result_item['Release']:
@@ -369,7 +381,6 @@ params_dict:
 
 params_dict = parse_qs(sys.argv[2])
 logger(params_dict)
-logger('temp_dir: {0}'.format(temp_dir))
 action_handler = ActionHandler(params_dict)
 if action_handler.validate_params():
     is_user_loggedin = action_handler.user_login()

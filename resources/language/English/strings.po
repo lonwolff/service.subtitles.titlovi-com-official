@@ -50,6 +50,6 @@ msgctxt "#32009"
 msgid "Video not playing!"
 msgstr ""
 
-msgctxt "#320010"
+msgctxt "#32010"
 msgid "Error when downloading subtitle!"
 msgstr ""
