@@ -12,9 +12,12 @@
     <extension point="xbmc.addon.metadata">
         <platform>all</platform>
         <summary lang="en">Titlovi.com</summary>
-        <description lang="en">Search and download Titlovi.com subtitles</description>
+        <description lang="en">Search and download Titlovi.com subtitles. Click here to read more info about manual searching.</description>
         <disclaimer>Users need to provide Titlovi.com username and password in add-on configuration</disclaimer>
-        <news>Official addon</news>
+        <news>
+Official addon
+-When using manual search for TV shows please use this example format for season and episode numbers: The Wire S01E01
+        </news>
         <platform>all</platform>
         <language></language>
         <license>GNU GENERAL PUBLIC LICENSE. Version 2, June 1991</license>
