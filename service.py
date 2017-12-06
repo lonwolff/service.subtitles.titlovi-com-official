@@ -15,6 +15,7 @@ import unicodedata
 import StringIO
 from datetime import datetime, timedelta
 from urlparse import parse_qs
+from urllib import quote_plus
 from zipfile import ZipFile
 
 addon = xbmcaddon.Addon()
@@ -66,7 +67,6 @@ def parse_season_episode(_string):
     Allowed format is 'S01E01'. Allowed number range is 00-99.
     Returns three-tuple.
     """
-
     if not _string:
         return _string, None, None
     results = re.findall('[sS](\d{2})[eE](\d{2})', _string)
@@ -87,7 +87,6 @@ def parse_season_episode(_string):
     except Exception as e:
         logger(e)
         episode = None
-
     if season is not None and episode is not None:
         _string = _string.lower().replace('s{0}e{1}'.format(results[0][0], results[0][1]), '')
 
@@ -138,6 +137,7 @@ class ActionHandler(object):
         """
         if not self.username or not self.password:
             show_notification(get_string(32005))
+            addon.openSettings()
             return False
         if self.action not in ('search', 'manualsearch', 'download'):
             show_notification(get_string(2103))
@@ -337,7 +337,6 @@ class ActionHandler(object):
             search_params['token'] = self.login_token
             search_params['userid'] = self.user_id
             search_params['json'] = True
-            result_list_page = 1
             result_list = []
             logger('search params: {0}'.format(search_params))
             try:
@@ -350,10 +349,11 @@ class ActionHandler(object):
                     Force user login in case of Unauthorized response
                     and retry search with new login token
                     """
-                    is_loggedin = self.user_login()
-                    if not is_loggedin:
+                    resp_json = self.handle_login()
+                    if not resp_json:
                         logger('Force login failed, exiting!')
                         return
+                    self.set_login_data(resp_json)
                     search_params['token'] = self.login_token
                     search_params['userid'] = self.user_id
                     response = requests.get('{0}/search'.format(api_url), params=search_params)
@@ -381,8 +381,18 @@ class ActionHandler(object):
 
         for result_item in result_list:
             title = result_item['Title']
-            if result_item['Season'] and result_item['Episode']:
-                title = u'{0} S{1}E{2}'.format(title, result_item['Season'], result_item['Episode'])
+            try:
+                season = int(result_item['Season'])
+            except Exception as e:
+                season = -1
+
+            try:
+                episode = int(result_item['Episode'])
+            except Exception as e:
+                episode = -1
+
+            if season > 0 and episode > 0:
+                title = u'{0} S{1}E{2}'.format(title, season, episode)
 
             if result_item['Release']:
                 title = u'{0} {1}'.format(title, result_item['Release'])
@@ -398,22 +408,44 @@ class ActionHandler(object):
 
             xbmcplugin.addDirectoryItem(handle=plugin_handle, url=url, listitem=listitem, isFolder=False)
 
+    def kodi_list_multiple_zipped_subtitles(self, subtitle_folder, subtitle_list):
+        subtitle_folder_url_encoded = quote_plus(subtitle_folder)
+        for subtitle in subtitle_list:
+            listitem = xbmcgui.ListItem(label2=subtitle)
+            url = "plugin://{0}/?action=load_specific_subtitle&subtitle_folder={1}&subtitle_list={2}" \
+                .format(script_id, subtitle_folder_url_encoded, quote_plus(subtitle))
+            xbmcplugin.addDirectoryItem(handle=plugin_handle, url=url, listitem=listitem, isFolder=False)
+
+    def kodi_load_subtitle(self, subtitle_file_path):
+        logger('loading subtitle: {0}'.format(subtitle_file_path))
+        list_item = xbmcgui.ListItem(label='dummy_data')
+        xbmcplugin.addDirectoryItem(handle=plugin_handle, url=subtitle_file_path, listitem=list_item, isFolder=False)
+
+    def show_subtitle_picker_dialog(self, subtitle_list):
+        subtitle_list = [item for item in subtitle_list if not item.endswith('/')]
+        dialog = xbmcgui.Dialog()
+        index = dialog.select(get_string(32011), subtitle_list)
+        return index
+
     def handle_download_action(self):
         """
         Method used for downloading subtitle zip file and extracting it.
         If subtitle file is already downloaded it is reused.
         """
         subtitle_exists = False
-        cache_key = 'titlovi_com_subtitle_{0}_{1}'.format(self.params['media_id'], self.params['type'])
-        subtitle_file = addon_cache.get(cache_key)
-        if subtitle_file:
-            subtitle_file_path = os.path.join(temp_dir, subtitle_file)
-            if os.path.exists(subtitle_file_path) and os.path.isfile(subtitle_file_path):
+        cache_key = 'titlovi_com_subtitle_{0}_{1}'.format(self.params['media_id'][0], self.params['type'][0])
+        subtitle_folder_path = os.path.join(temp_dir, cache_key)
+        dummy_data = addon_cache.get(cache_key)
+        logger('dummy_data {}'.format(dummy_data))
+        if dummy_data:
+            subtitle_files = [subtitle for root, dirs, files in os.walk(subtitle_folder_path) for subtitle in files]
+            logger('subtitle_files {}'.format(subtitle_files))
+            if os.path.exists(subtitle_folder_path) and subtitle_files:
                 subtitle_exists = True
-                logger('subtitle_file found in cache')
+                logger('subtitle exists on disk, skipping download')
 
         if not subtitle_exists:
-            logger('subtitle_file not found in cache, starting download')
+            logger('subtitle not found on disk, starting download')
             download_url = "https://titlovi.com/download/?type={0}&mediaid={1}" \
                 .format(self.params['type'][0], self.params['media_id'][0])
             try:
@@ -436,14 +468,24 @@ class ActionHandler(object):
                 show_notification(get_string(32010))
                 return
 
-            subtitle_file = zip_contents[0]
-            logger('subtitle_file: {0}'.format(subtitle_file))
-            zip_file.extractall(temp_dir)
-            subtitle_file_path = os.path.join(temp_dir, subtitle_file)
-            addon_cache.set(cache_key, subtitle_file, expiration=timedelta(days=3))
+            logger('zip_contents: {0}'.format(zip_contents))
+            zip_file.extractall(subtitle_folder_path)
 
-        list_item = xbmcgui.ListItem(label=subtitle_file)
-        xbmcplugin.addDirectoryItem(handle=plugin_handle, url=subtitle_file_path, listitem=list_item, isFolder=False)
+            if len(zip_contents) > 1:
+                subtitle_file = self.show_subtitle_picker_dialog(zip_contents)
+                self.kodi_load_subtitle(os.path.join(subtitle_folder_path, subtitle_file))
+            else:
+                self.kodi_load_subtitle(os.path.join(subtitle_folder_path, zip_contents[0]))
+            addon_cache.set(cache_key, 'dummy_data', expiration=timedelta(days=3))
+        else:
+            subtitle_files = [(root, subtitle) for root, dirs, files in os.walk(subtitle_folder_path) for subtitle in
+                              files]
+            if len(subtitle_files) > 1:
+                index = self.show_subtitle_picker_dialog([item[1] for item in subtitle_files])
+                logger('show_subtitle_picker_dialog: {}'.format(index))
+                self.kodi_load_subtitle(os.path.join(subtitle_files[index][0], subtitle_files[index][1]))
+            else:
+                self.kodi_load_subtitle(os.path.join(subtitle_files[0], subtitle_files[1]))
 
 
 """

@@ -6,7 +6,8 @@
     <requires>
         <import addon="xbmc.python" version="2.7"/>
         <import addon="script.module.requests" version="2.18.4"/>
-        <import addon="script.module.simplecache"/>
+        <import addon="script.module.lat2cyr" version="0.3.2"/>
+        <import addon="script.module.simplecache"/> 
     </requires>
     <extension point="xbmc.subtitle.module" library="service.py"/>
     <extension point="xbmc.addon.metadata">

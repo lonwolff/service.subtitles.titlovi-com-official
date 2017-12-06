@@ -53,3 +53,7 @@ msgstr ""
 msgctxt "#32010"
 msgid "Error when downloading subtitle!"
 msgstr ""
+
+msgctxt "#32011"
+msgid "Choose subtitle file"
+msgstr ""
